@@ -5,7 +5,7 @@ from os import PathLike
 from pathlib import Path
 from evalplus.data import write_jsonl
 
-from model import DecoderBase, make_model
+from codegen.model import DecoderBase, make_model
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
