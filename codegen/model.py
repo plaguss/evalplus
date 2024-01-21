@@ -285,6 +285,8 @@ class HFTorchDecoder(DecoderBase):
                 "deepseek-ai/deepseek-coder-6.7b-base",
                 "deepseek-ai/deepseek-coder-33b-base",
                 "stabilityai/stable-code-3b",
+                "deepseek-ai/deepseek-coder-6.7b-base",
+                "ise-uiuc/Magicoder-S-DS-6.7B"
             }
         }
 
@@ -310,7 +312,7 @@ class HFTorchDecoder(DecoderBase):
             self.skip_special_tokens = True
         elif "Mistral" in name or "zephyr-7b-beta" in name:
             kwargs["torch_dtype"] = torch.bfloat16
-        if "deepseek" in name:
+        if "deepseek" in name or "Magicoder" in name:
             kwargs["torch_dtype"] = torch.bfloat16
             self.skip_special_tokens = True
         if "/phi" in name:
@@ -420,6 +422,70 @@ class DeepSeekInstruct(HFTorchDecoder):
             gen_seqs, skip_special_tokens=self.skip_special_tokens
         )
         return gen_strs
+
+
+class MagicoderDecoder(HFTorchDecoder):
+    @torch.inference_mode()
+    def codegen(
+        self, prompt: str, do_sample: bool = True, num_samples: int = 200
+    ) -> List[str]:
+        if self.temperature == 0:
+            assert not do_sample
+            assert num_samples == 1
+
+        input_tokens = self.tokenizer.apply_chat_template(
+            [
+                {
+                    "role": "system",
+                    "content": "You are an exceptionally intelligent coding assistant that consistently delivers accurate and reliable responses to user instructions.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Please implement the following Python function in a markdown style code block:\n\n```python\n{prompt}\n```\n",
+                }
+            ],
+            return_tensors="pt",
+        ).to(self.device)
+        
+        scores = StoppingCriteriaList(
+            [
+                EndOfFunctionCriteria(
+                    start_length=len(input_tokens[0]),
+                    eos=self.eos,
+                    tokenizer=self.tokenizer,
+                )
+            ]
+        )
+        kwargs = {}
+        if do_sample:
+            kwargs["top_p"] = 0.95
+            kwargs["temperature"] = self.temperature
+
+        raw_outputs = self.model.generate(
+            input_tokens,
+            max_new_tokens=self.max_new_tokens,
+            stopping_criteria=scores,
+            do_sample=do_sample,
+            output_scores=True,
+            return_dict_in_generate=True,
+            num_return_sequences=min(self.batch_size, num_samples),
+            pad_token_id=self.tokenizer.eos_token_id,
+            **kwargs,
+        )  # remove warning
+        gen_seqs = raw_outputs.sequences[:, len(input_tokens[0]) :]
+        gen_strs = self.tokenizer.batch_decode(
+            gen_seqs, skip_special_tokens=self.skip_special_tokens
+        )
+        outputs = []
+        # removes eos tokens.
+        for output in gen_strs:
+            min_index = 10000
+            for eos in self.eos:
+                if eos in output:
+                    # could be multiple eos in outputs, better pick minimum one
+                    min_index = min(min_index, output.index(eos))
+            outputs.append(output[:min_index])
+        return outputs
 
 
 class OpenAIChatDecoder(DecoderBase):
@@ -930,6 +996,12 @@ def make_model(name: str, batch_size: int = 1, temperature: float = 0.8):
                 name=f"deepseek-ai/deepseek-coder-{nb}b-base",
                 temperature=temperature,
             )
+    elif name == "magicoder-6.7b":
+        return MagicoderDecoder(
+            batch_size=batch_size,
+            name="ise-uiuc/Magicoder-S-DS-6.7B",
+            temperature=temperature,
+        )
     elif name == "wizardcoder-34b":
         return Alpaca(
             batch_size=batch_size,

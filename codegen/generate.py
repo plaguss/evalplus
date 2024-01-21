@@ -1,3 +1,19 @@
+"""
+
+Once evalplus is installed, run from the console:
+
+MODEL="ise-uiuc/Magicoder-S-DS-6.7B"
+benchmark="human_plus"
+evalplus.codegen \
+    --model $MODEL \
+    --temperature 0.8 \
+    --dataset "humaneval" \
+    --root ./output_dir_${benchmark} \
+    --n_samples 1 \
+    --contract-type "none" \
+    --greedy
+"""
+
 import argparse
 import os
 from os import PathLike
@@ -116,7 +132,7 @@ def prepare_samples(outputs_dir: PathLike, samples_path: PathLike = "./samples.j
     files = list(Path(outputs_dir).rglob("*.py"))
     samples = []
     for f in files:
-        solution = f.read_text()
+        solution = f.read_text(encoding="utf-8")
         samples.append(dict(task_id=f.parent.name.replace("_", "/"), solution=solution))
 
     write_jsonl(samples_path, samples)
